@@ -50,7 +50,6 @@ jobs:
           conda env create -f clean_env.yaml -p ./conda-env
           conda clean -afy
 
-          # 直接使用环境中的 pip 安装那 11 个纯 Python 包（无需激活脚本）
           ./conda-env/bin/pip install --no-cache-dir \
             plyfile \
             tensorboard \
