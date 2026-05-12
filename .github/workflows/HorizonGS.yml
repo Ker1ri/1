@@ -1,0 +1,73 @@
+name: 🎯 Horizon-GS Offline Conda Pack (Split Release)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write    # 用于创建 Release
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: 📥 检出 Horizon-GS 仓库（含子模块）
+        uses: actions/checkout@v4
+        with:
+          repository: city-super/Horizon-GS
+          submodules: recursive
+          path: Horizon-GS
+
+      # ---------- 安装 Miniconda ----------
+      - name: 🐍 安装 Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.8"
+          miniconda-version: "latest"
+
+      # ---------- 创建 Conda 环境 ----------
+      - name: 🌱 创建 horizon_gs 环境
+        shell: bash -l {0}
+        run: |
+          conda env create -f Horizon-GS/environment.yml -p ./conda-env
+          conda clean -afy
+          echo "环境大小："
+          du -sh conda-env
+
+      # ---------- 用 conda-pack 打包 ----------
+      - name: 📦 使用 conda-pack 打包环境
+        shell: bash -l {0}
+        run: |
+          # 安装 conda-pack 到 base 环境
+          conda install -n base -c conda-forge conda-pack -y
+          # 打包 horizon_gs 环境（输出 tar.gz）
+          conda pack -p ./conda-env -o horizon_gs_env.tar.gz
+          echo "打包完成，文件大小："
+          ls -lh horizon_gs_env.tar.gz
+
+      # ---------- 分片处理（保证每个分片 < 2GB）----------
+      - name: ✂️ 切割为 1.9GB 的小分片
+        run: |
+          mkdir -p release-parts
+          split -b 1900M -d horizon_gs_env.tar.gz release-parts/horizon_gs_env.tar.gz.part_
+          echo "分片列表："
+          ls -lh release-parts/
+
+      # ---------- 发布为 Release ----------
+      - name: 🚀 创建 Release 并上传所有分片
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: conda-pack-${{ github.run_id }}
+          name: "Horizon-GS Offline Env (Run ${{ github.run_id }})"
+          body: |
+            ### 📦 基于 conda-pack 的离线环境
+            - 运行 ID: ${{ github.run_id }}
+            - 使用方法：
+              1. 下载所有 `part_*` 文件
+              2. 合并：`cat horizon_gs_env.tar.gz.part_* > horizon_gs_env.tar.gz`
+              3. 解压：`tar -xzf horizon_gs_env.tar.gz -C /path/to/env`
+              4. 激活环境：
+                 ```bash
+                 source /path/to/env/bin/activate
+                 conda-unpack
