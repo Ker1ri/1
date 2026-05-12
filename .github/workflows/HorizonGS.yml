@@ -1,4 +1,4 @@
-name: 🎯 Horizon-GS Offline Conda Pack (No Pip Dependencies)
+name:  Horizon-GS Offline Conda Pack (No Pip Dependencies)
 
 on:
   workflow_dispatch:
@@ -11,14 +11,14 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: 📥 检出 Horizon-GS 仓库（含子模块）
+      - name:  检出 Horizon-GS 仓库（含子模块）
         uses: actions/checkout@v5
         with:
           repository: InternRobotics/HorizonGS
           submodules: recursive
           path: Horizon-GS
 
-      - name: 🐍 安装 Miniconda
+      - name:  安装 Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
@@ -26,7 +26,7 @@ jobs:
           python-version: "3.8"
           miniconda-version: "latest"
 
-      - name: 📝 创建纯净 conda 环境（只含 conda 依赖，零 pip）
+      - name:  创建纯净 conda 环境（只含 conda 依赖，零 pip）
         shell: bash -l {0}
         run: |
           # 直接从官方 environment.yml 中提取 conda 依赖部分，手工构建一个纯净版
@@ -52,26 +52,26 @@ jobs:
           echo "环境大小："
           du -sh conda-env
 
-      - name: 📦 使用 conda-pack 打包环境
+      - name:  使用 conda-pack 打包环境
         shell: bash -l {0}
         run: |
           conda install -n base -c conda-forge conda-pack -y
-          conda pack -p ./conda-env -o horizon_gs_env.tar.gz
+          conda-pack -p ./conda-env -o horizon_gs_env.tar.gz
           ls -lh horizon_gs_env.tar.gz
 
-      - name: ✂️ 切割为 1.9GB 的小分片
+      - name:  切割为 1.9GB 的小分片
         run: |
           mkdir -p release-parts
           split -b 1900M -d horizon_gs_env.tar.gz release-parts/horizon_gs_env.tar.gz.part_
           ls -lh release-parts/
 
-      - name: 🚀 创建 Release 并上传所有分片
+      - name:  创建 Release 并上传所有分片
         uses: softprops/action-gh-release@v3
         with:
           tag_name: conda-pack-${{ github.run_id }}
           name: "Horizon-GS Offline Conda Env (No Pip) - Run ${{ github.run_id }}"
           body: |
-            ### 📦 基于 conda-pack 的离线环境（已移除所有 pip 依赖）
+            ###  基于 conda-pack 的离线环境（已移除所有 pip 依赖）
             - 运行 ID: ${{ github.run_id }}
             - 包含的 conda 包：
               - cudatoolkit=11.8
