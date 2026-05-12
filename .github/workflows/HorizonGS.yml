@@ -49,22 +49,6 @@ jobs:
 
           conda env create -f clean_environment.yml -p ./conda-env
           conda clean -afy
-
-          source ./conda-env/bin/activate
-          pip install --no-cache-dir \
-            plyfile \
-            tensorboard \
-            tqdm \
-            einops \
-            wandb \
-            lpips \
-            laspy \
-            jaxtyping \
-            colorama \
-            opencv-python \
-            scikit-learn
-          conda deactivate
-
           echo "环境大小："
           du -sh conda-env
 
