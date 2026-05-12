@@ -1,71 +1,85 @@
-name:  Horizon-GS Offline Conda Pack (Split Release)
+name: 🎯 Horizon-GS Offline Conda Pack (No Pip Dependencies)
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write    # 用于创建 Release
+  contents: write
 
 jobs:
   build-and-release:
     runs-on: ubuntu-24.04
 
     steps:
-      - name:  检出 Horizon-GS 仓库（含子模块）
-        uses: actions/checkout@v5  # 升级到 v5 (Node.js 24)
+      - name: 📥 检出 Horizon-GS 仓库（含子模块）
+        uses: actions/checkout@v5
         with:
           repository: InternRobotics/HorizonGS
           submodules: recursive
           path: Horizon-GS
-          # 如果仓库是私有的，请取消下一行的注释，并配置好 secrets.PAT_TOKEN
-          # token: ${{ secrets.PAT_TOKEN }}
 
-      # ---------- 安装 Miniconda ----------
-      - name:  安装 Miniconda
+      - name: 🐍 安装 Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
+          conda-remove-defaults: false
           python-version: "3.8"
-          conda-remove-defaults: false 
           miniconda-version: "latest"
 
-      # ---------- 创建 Conda 环境 ----------
-      - name:  创建 horizon_gs 环境
+      - name: 📝 创建纯净 conda 环境（只含 conda 依赖，零 pip）
         shell: bash -l {0}
         run: |
-          conda env create -f Horizon-GS/environment.yml -p ./conda-env
+          # 直接从官方 environment.yml 中提取 conda 依赖部分，手工构建一个纯净版
+          cat > clean_environment.yml << 'EOF'
+          name: horizon_gs
+          channels:
+            - pytorch
+            - pyg
+            - conda-forge
+            - defaults
+          dependencies:
+            - cudatoolkit=11.8
+            - python=3.8.19
+            - pip=24.2
+            - pytorch=2.1.2
+            - torchaudio=2.1.2
+            - torchvision=0.16.2
+            - pytorch-scatter
+          EOF
+
+          conda env create -f clean_environment.yml -p ./conda-env
           conda clean -afy
           echo "环境大小："
           du -sh conda-env
 
-      # ---------- 用 conda-pack 打包 ----------
-      - name:  使用 conda-pack 打包环境
+      - name: 📦 使用 conda-pack 打包环境
         shell: bash -l {0}
         run: |
-          # 安装 conda-pack 到 base 环境
           conda install -n base -c conda-forge conda-pack -y
-          # 打包 horizon_gs 环境（输出 tar.gz）
           conda pack -p ./conda-env -o horizon_gs_env.tar.gz
-          echo "打包完成，文件大小："
           ls -lh horizon_gs_env.tar.gz
 
-      # ---------- 分片处理（保证每个分片 < 2GB）----------
-      - name:  切割为 1.9GB 的小分片
+      - name: ✂️ 切割为 1.9GB 的小分片
         run: |
           mkdir -p release-parts
           split -b 1900M -d horizon_gs_env.tar.gz release-parts/horizon_gs_env.tar.gz.part_
-          echo "分片列表："
           ls -lh release-parts/
 
-      # ---------- 发布为 Release ----------
-      - name:  创建 Release 并上传所有分片
-        uses: softprops/action-gh-release@v3  # 升级到 v3 (Node.js 24)
+      - name: 🚀 创建 Release 并上传所有分片
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: conda-pack-${{ github.run_id }}
-          name: "Horizon-GS Offline Env (Run ${{ github.run_id }})"
+          name: "Horizon-GS Offline Conda Env (No Pip) - Run ${{ github.run_id }}"
           body: |
-            ###  基于 conda-pack 的离线环境
+            ### 📦 基于 conda-pack 的离线环境（已移除所有 pip 依赖）
             - 运行 ID: ${{ github.run_id }}
+            - 包含的 conda 包：
+              - cudatoolkit=11.8
+              - python=3.8.19
+              - pytorch=2.1.2
+              - torchaudio=2.1.2
+              - torchvision=0.16.2
+              - pytorch-scatter
             - 使用方法：
               1. 下载所有 `part_*` 文件
               2. 合并：`cat horizon_gs_env.tar.gz.part_* > horizon_gs_env.tar.gz`
