@@ -26,6 +26,7 @@ jobs:
         with:
           auto-update-conda: true
           python-version: "3.8"
+          conda-remove-defaults: false 
           miniconda-version: "latest"
 
       # ---------- 创建 Conda 环境 ----------
