@@ -12,11 +12,13 @@ jobs:
 
     steps:
       - name:  检出 Horizon-GS 仓库（含子模块）
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5  # 升级到 v5 (Node.js 24)
         with:
-          repository: city-super/Horizon-GS
+          repository: InternRobotics/HorizonGS
           submodules: recursive
           path: Horizon-GS
+          # 如果仓库是私有的，请取消下一行的注释，并配置好 secrets.PAT_TOKEN
+          # token: ${{ secrets.PAT_TOKEN }}
 
       # ---------- 安装 Miniconda ----------
       - name:  安装 Miniconda
@@ -56,7 +58,7 @@ jobs:
 
       # ---------- 发布为 Release ----------
       - name:  创建 Release 并上传所有分片
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3  # 升级到 v3 (Node.js 24)
         with:
           tag_name: conda-pack-${{ github.run_id }}
           name: "Horizon-GS Offline Env (Run ${{ github.run_id }})"
