@@ -1,4 +1,4 @@
-name: 🎯 Horizon-GS Offline Conda Pack (Split Release)
+name:  Horizon-GS Offline Conda Pack (Split Release)
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: 📥 检出 Horizon-GS 仓库（含子模块）
+      - name:  检出 Horizon-GS 仓库（含子模块）
         uses: actions/checkout@v4
         with:
           repository: city-super/Horizon-GS
@@ -19,7 +19,7 @@ jobs:
           path: Horizon-GS
 
       # ---------- 安装 Miniconda ----------
-      - name: 🐍 安装 Miniconda
+      - name:  安装 Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
@@ -27,7 +27,7 @@ jobs:
           miniconda-version: "latest"
 
       # ---------- 创建 Conda 环境 ----------
-      - name: 🌱 创建 horizon_gs 环境
+      - name:  创建 horizon_gs 环境
         shell: bash -l {0}
         run: |
           conda env create -f Horizon-GS/environment.yml -p ./conda-env
@@ -36,7 +36,7 @@ jobs:
           du -sh conda-env
 
       # ---------- 用 conda-pack 打包 ----------
-      - name: 📦 使用 conda-pack 打包环境
+      - name:  使用 conda-pack 打包环境
         shell: bash -l {0}
         run: |
           # 安装 conda-pack 到 base 环境
@@ -47,7 +47,7 @@ jobs:
           ls -lh horizon_gs_env.tar.gz
 
       # ---------- 分片处理（保证每个分片 < 2GB）----------
-      - name: ✂️ 切割为 1.9GB 的小分片
+      - name:  切割为 1.9GB 的小分片
         run: |
           mkdir -p release-parts
           split -b 1900M -d horizon_gs_env.tar.gz release-parts/horizon_gs_env.tar.gz.part_
@@ -55,13 +55,13 @@ jobs:
           ls -lh release-parts/
 
       # ---------- 发布为 Release ----------
-      - name: 🚀 创建 Release 并上传所有分片
+      - name:  创建 Release 并上传所有分片
         uses: softprops/action-gh-release@v2
         with:
           tag_name: conda-pack-${{ github.run_id }}
           name: "Horizon-GS Offline Env (Run ${{ github.run_id }})"
           body: |
-            ### 📦 基于 conda-pack 的离线环境
+            ###  基于 conda-pack 的离线环境
             - 运行 ID: ${{ github.run_id }}
             - 使用方法：
               1. 下载所有 `part_*` 文件
