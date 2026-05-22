@@ -1,0 +1,248 @@
+name: Pack horizon_gs Conda Environment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create environment.yml
+        shell: bash
+        run: |
+          cat > environment.yml <<'EOF'
+          name: horizon_gs
+          channels:
+            - pytorch
+            - pyg
+            - conda-forge
+            - defaults
+          dependencies:
+            - cudatoolkit=11.8
+            - python=3.10
+            - pip=24.2
+            - pytorch=2.1.2
+            - torchaudio=2.1.2
+            - torchvision=0.16.2
+            - pytorch-scatter
+            - pip:
+                - numpy==1.26.4
+                - pandas==2.2.3
+                - matplotlib==3.9.3
+                - scipy==1.10.1
+                - scikit-learn==1.5.2
+                - plyfile==1.1.3
+                - tensorboard==2.20.0
+                - tqdm==4.67.1
+                - einops==0.8.2
+                - wandb==0.16.6
+                - lpips==0.1.4
+                - laspy==2.7.0
+                - jaxtyping==0.3.7
+                - colorama==0.4.6
+                - opencv-python==4.10.0.84
+                - open3d==0.19.0
+                - ninja
+                - rich
+                - kornia
+          EOF
+
+          echo "Generated environment.yml:"
+          cat environment.yml
+
+      - name: Setup Miniconda and create horizon_gs environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest
+          auto-update-conda: false
+          activate-environment: horizon_gs
+          environment-file: environment.yml
+          auto-activate-base: false
+
+      - name: Show conda information
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+          conda info
+          conda env list
+
+          echo "Disk after environment creation:"
+          df -h
+
+          echo "horizon_gs env size:"
+          du -sh "$CONDA/envs/horizon_gs"
+
+      - name: Check horizon_gs environment
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Check Python version:"
+          conda run -n horizon_gs python -V
+
+          echo "Check pip:"
+          conda run -n horizon_gs python -m pip --version
+
+          echo "Check PyTorch:"
+          conda run -n horizon_gs python - <<'PY'
+          import torch
+          print("torch:", torch.__version__)
+          print("torch cuda:", torch.version.cuda)
+          print("cuda available:", torch.cuda.is_available())
+          print("cuda device count:", torch.cuda.device_count())
+          PY
+
+          echo "Check pytorch_scatter:"
+          conda run -n horizon_gs python - <<'PY'
+          import torch_scatter
+          print("torch_scatter:", torch_scatter.__version__)
+          PY
+
+          echo "Check important packages:"
+          conda run -n horizon_gs python - <<'PY'
+          import plyfile
+          import tensorboard
+          import tqdm
+          import einops
+          import wandb
+          import lpips
+          import laspy
+          import jaxtyping
+          import colorama
+          import cv2
+          import sklearn
+
+          print("all important packages imported successfully")
+          print("cv2:", cv2.__version__)
+          print("sklearn:", sklearn.__version__)
+          PY
+
+      - name: Install conda-pack into base with pip
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "CONDA=$CONDA"
+
+          echo "Install conda-pack into base by pip:"
+          "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
+
+          echo "Check conda-pack module:"
+          "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
+
+          echo "Check conda-pack executable:"
+          ls -lh "$CONDA/bin/conda-pack"
+          "$CONDA/bin/conda-pack" --version
+
+      - name: Clean caches before packing
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Disk before clean:"
+          df -h
+
+          echo "Clean conda caches:"
+          conda clean -a -y
+
+          echo "Remove user caches only:"
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+          echo "Do NOT remove $CONDA/pkgs before conda-pack."
+          echo "Do NOT delete files inside $CONDA/envs/horizon_gs."
+
+          echo "horizon_gs env size:"
+          du -sh "$CONDA/envs/horizon_gs"
+
+          echo "Disk after clean:"
+          df -h
+
+      - name: Pack and split horizon_gs environment
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "Disk before pack:"
+          df -h
+
+          rm -rf release_parts
+          mkdir -p release_parts
+
+          rm -f horizon_gs.tar.gz
+
+          echo "Confirm horizon_gs Python:"
+          "$CONDA/bin/conda" run -n horizon_gs python -V
+
+          echo "Using conda-pack:"
+          "$CONDA/bin/conda-pack" --version
+
+          echo "Packing horizon_gs environment to normal tar.gz file:"
+          "$CONDA/bin/conda-pack" \
+            -n horizon_gs \
+            -o horizon_gs.tar.gz \
+            --format tar.gz \
+            --ignore-missing-files \
+            --force
+
+          echo "Packed file:"
+          ls -lh horizon_gs.tar.gz
+
+          echo "Disk after pack:"
+          df -h
+
+          echo "Split package:"
+          split -b 1900M -d -a 3 horizon_gs.tar.gz release_parts/horizon_gs.tar.gz.part-
+
+          echo "Generate checksum for full tar.gz:"
+          sha256sum horizon_gs.tar.gz > release_parts/horizon_gs.tar.gz.sha256
+
+          echo "Remove full tar.gz to free disk:"
+          rm -f horizon_gs.tar.gz
+
+          cd release_parts
+
+          echo "Generated parts:"
+          ls -lh
+
+          echo "Generate SHA256SUMS for parts:"
+          sha256sum horizon_gs.tar.gz.part-* > SHA256SUMS.txt
+
+          echo "Checksums:"
+          cat SHA256SUMS.txt
+          cat horizon_gs.tar.gz.sha256
+
+          echo "Disk after split:"
+          df -h
+
+      - name: Create GitHub Release and upload parts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: horizon-gs-conda-${{ github.run_number }}
+          name: horizon_gs Conda Environment ${{ github.run_number }}
+          body: |
+            horizon_gs Conda environment package.
+
+            Environment name:
+
+            ```text
+            horizon_gs
+
+            Python version:
+
+ 
+
+```text
+
+Python 3.10
