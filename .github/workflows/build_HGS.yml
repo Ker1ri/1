@@ -238,11 +238,13 @@ jobs:
 
             ```text
             horizon_gs
+            ```
 
             Python version:
+            ```text
+            3.10
+            ```
 
  
 
-```text
 
-Python 3.10
