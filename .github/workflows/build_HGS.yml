@@ -25,13 +25,13 @@ jobs:
             - conda-forge
             - defaults
           dependencies:
-            - cudatoolkit=11.8
             - python=3.10
             - pip=24.2
-            - pytorch=2.1.2=*cuda118*
+            - pytorch=2.1.2
             - torchaudio=2.1.2
-            - torchvision=0.16.2=*cuda118*
-            - pytorch-scatter=*cuda118*
+            - torchvision=0.16.2
+            - pytorch-cuda=11.8          # 关键！强制 PyTorch 使用 CUDA 11.8
+            - pytorch-scatter
             - pip:
                 - numpy==1.26.4
                 - pandas==2.2.3
