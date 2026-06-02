@@ -28,10 +28,10 @@ jobs:
             - cudatoolkit=11.8
             - python=3.10
             - pip=24.2
-            - pytorch=2.1.2
+            - pytorch=2.1.2=*cuda118*
             - torchaudio=2.1.2
-            - torchvision=0.16.2
-            - pytorch-scatter
+            - torchvision=0.16.2=*cuda118*
+            - pytorch-scatter=*cuda118*
             - pip:
                 - numpy==1.26.4
                 - pandas==2.2.3
@@ -203,7 +203,7 @@ jobs:
           df -h
 
           echo "Split package:"
-          split -b 1900M -d -a 3 horizon_gs.tar.gz release_parts/horizon_gs.tar.gz.part-
+          split -b 1024M -d -a 3 horizon_gs.tar.gz release_parts/horizon_gs.tar.gz.part-
 
           echo "Generate checksum for full tar.gz:"
           sha256sum horizon_gs.tar.gz > release_parts/horizon_gs.tar.gz.sha256
