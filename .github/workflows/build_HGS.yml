@@ -14,58 +14,55 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create environment.yml
-        shell: bash
-        run: |
-          cat > environment.yml <<'EOF'
-          name: horizon_gs
-          channels:
-            - pytorch
-            - pyg
-            - conda-forge
-            - defaults
-          dependencies:
-            - python=3.10
-            - pip=24.2
-            - pytorch=2.1.2
-            - torchaudio=2.1.2
-            - torchvision=0.16.2
-            - pytorch-cuda=11.8          # 关键！强制 PyTorch 使用 CUDA 11.8
-            - pytorch-scatter
-            - pip:
-                - numpy==1.26.4
-                - pandas==2.2.3
-                - matplotlib==3.9.3
-                - scipy==1.10.1
-                - scikit-learn==1.5.2
-                - plyfile==1.1.3
-                - tensorboard==2.20.0
-                - tqdm==4.67.1
-                - einops==0.8.2
-                - wandb==0.16.6
-                - lpips==0.1.4
-                - laspy==2.7.0
-                - jaxtyping==0.3.7
-                - colorama==0.4.6
-                - opencv-python==4.10.0.84
-                - open3d==0.19.0
-                - shapely
-                - ninja
-                - rich
-                - kornia
-          EOF
-
-          echo "Generated environment.yml:"
-          cat environment.yml
-
-      - name: Setup Miniconda and create horizon_gs environment
+      - name: Setup Miniconda (base only)
         uses: conda-incubator/setup-miniconda@v3
         with:
           miniconda-version: latest
           auto-update-conda: false
-          activate-environment: horizon_gs
-          environment-file: environment.yml
           auto-activate-base: false
+
+      - name: Create horizon_gs environment
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          # 创建纯 Python 环境
+          conda create -n horizon_gs python=3.10 pip=24.2 -y
+
+          # 从 pytorch 官方 channel 安装 CUDA 版本的 PyTorch
+          # pytorch-cuda=11.8 会自动带入对应的 cudatoolkit
+          conda install -n horizon_gs -y \
+            -c pytorch -c nvidia -c conda-forge \
+            pytorch=2.1.2 torchvision=0.16.2 torchaudio=2.1.2 \
+            pytorch-cuda=11.8
+
+          # 安装 pytorch-scatter（需要 pyg channel）
+          conda install -n horizon_gs -y \
+            -c pyg -c pytorch -c nvidia -c conda-forge \
+            pytorch-scatter
+
+          # 安装 pip 依赖
+          conda run -n horizon_gs pip install \
+            numpy==1.26.4 \
+            pandas==2.2.3 \
+            matplotlib==3.9.3 \
+            scipy==1.10.1 \
+            scikit-learn==1.5.2 \
+            plyfile==1.1.3 \
+            tensorboard==2.20.0 \
+            tqdm==4.67.1 \
+            einops==0.8.2 \
+            wandb==0.16.6 \
+            lpips==0.1.4 \
+            laspy==2.7.0 \
+            jaxtyping==0.3.7 \
+            colorama==0.4.6 \
+            "opencv-python==4.10.0.84" \
+            open3d==0.19.0 \
+            shapely \
+            ninja \
+            rich \
+            kornia
 
       - name: Show conda information
         shell: bash -el {0}
@@ -90,9 +87,6 @@ jobs:
           echo "Check Python version:"
           conda run -n horizon_gs python -V
 
-          echo "Check pip:"
-          conda run -n horizon_gs python -m pip --version
-
           echo "Check PyTorch:"
           conda run -n horizon_gs python - <<'PY'
           import torch
@@ -100,6 +94,8 @@ jobs:
           print("torch cuda:", torch.version.cuda)
           print("cuda available:", torch.cuda.is_available())
           print("cuda device count:", torch.cuda.device_count())
+          # GitHub Actions runner 没有 GPU，cuda available 是 False 属正常
+          assert torch.version.cuda is not None, "Not a CUDA build!"
           PY
 
           echo "Check pytorch_scatter:"
@@ -110,18 +106,8 @@ jobs:
 
           echo "Check important packages:"
           conda run -n horizon_gs python - <<'PY'
-          import plyfile
-          import tensorboard
-          import tqdm
-          import einops
-          import wandb
-          import lpips
-          import laspy
-          import jaxtyping
-          import colorama
-          import cv2
-          import sklearn
-
+          import plyfile, tensorboard, tqdm, einops, wandb
+          import lpips, laspy, jaxtyping, colorama, cv2, sklearn
           print("all important packages imported successfully")
           print("cv2:", cv2.__version__)
           print("sklearn:", sklearn.__version__)
@@ -132,16 +118,7 @@ jobs:
         run: |
           set -exo pipefail
 
-          echo "CONDA=$CONDA"
-
-          echo "Install conda-pack into base by pip:"
           "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
-
-          echo "Check conda-pack module:"
-          "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
-
-          echo "Check conda-pack executable:"
-          ls -lh "$CONDA/bin/conda-pack"
           "$CONDA/bin/conda-pack" --version
 
       - name: Clean caches before packing
@@ -149,20 +126,8 @@ jobs:
         run: |
           set -euxo pipefail
 
-          echo "Disk before clean:"
-          df -h
-
-          echo "Clean conda caches:"
           conda clean -a -y
-
-          echo "Remove user caches only:"
-          rm -rf ~/.cache/pip || true
-          rm -rf ~/.cache/torch || true
-          rm -rf ~/.cache/huggingface || true
-          rm -rf ~/.cache/conda || true
-          rm -rf ~/.nv || true
-          echo "Do NOT remove $CONDA/pkgs before conda-pack."
-          echo "Do NOT delete files inside $CONDA/envs/horizon_gs."
+          rm -rf ~/.cache/pip ~/.cache/torch ~/.cache/huggingface ~/.cache/conda ~/.nv || true
 
           echo "horizon_gs env size:"
           du -sh "$CONDA/envs/horizon_gs"
@@ -175,21 +140,9 @@ jobs:
         run: |
           set -exo pipefail
 
-          echo "Disk before pack:"
-          df -h
-
-          rm -rf release_parts
-          mkdir -p release_parts
-
+          rm -rf release_parts && mkdir -p release_parts
           rm -f horizon_gs.tar.gz
 
-          echo "Confirm horizon_gs Python:"
-          "$CONDA/bin/conda" run -n horizon_gs python -V
-
-          echo "Using conda-pack:"
-          "$CONDA/bin/conda-pack" --version
-
-          echo "Packing horizon_gs environment to normal tar.gz file:"
           "$CONDA/bin/conda-pack" \
             -n horizon_gs \
             -o horizon_gs.tar.gz \
@@ -197,34 +150,18 @@ jobs:
             --ignore-missing-files \
             --force
 
-          echo "Packed file:"
           ls -lh horizon_gs.tar.gz
-
-          echo "Disk after pack:"
           df -h
 
-          echo "Split package:"
-          split -b 1024M -d -a 3 horizon_gs.tar.gz release_parts/horizon_gs.tar.gz.part-
-
-          echo "Generate checksum for full tar.gz:"
+          split -b 1900M -d -a 3 horizon_gs.tar.gz release_parts/horizon_gs.tar.gz.part-
           sha256sum horizon_gs.tar.gz > release_parts/horizon_gs.tar.gz.sha256
-
-          echo "Remove full tar.gz to free disk:"
           rm -f horizon_gs.tar.gz
 
           cd release_parts
-
-          echo "Generated parts:"
-          ls -lh
-
-          echo "Generate SHA256SUMS for parts:"
           sha256sum horizon_gs.tar.gz.part-* > SHA256SUMS.txt
-
-          echo "Checksums:"
           cat SHA256SUMS.txt
           cat horizon_gs.tar.gz.sha256
 
-          echo "Disk after split:"
           df -h
 
       - name: Create GitHub Release and upload parts
@@ -236,7 +173,6 @@ jobs:
             horizon_gs Conda environment package.
 
             Environment name:
-
             ```text
             horizon_gs
             ```
@@ -249,7 +185,3 @@ jobs:
             release_parts/horizon_gs.tar.gz.part-*
             release_parts/SHA256SUMS.txt
           fail_on_unmatched_files: true
-
- 
-
-
