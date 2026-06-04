@@ -126,7 +126,7 @@ jobs:
           ls -lh milo.tar.gz
           df -h
 
-          split -b 1900M -d -a 3 milo.tar.gz release_parts/milo.tar.gz.part-
+          split -b 1000M -d -a 3 milo.tar.gz release_parts/milo.tar.gz.part-
           sha256sum milo.tar.gz > release_parts/milo.tar.gz.sha256
           rm -f milo.tar.gz
 
