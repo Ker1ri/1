@@ -28,14 +28,30 @@ jobs:
 
           conda create -n milo python=3.9 pip -y
 
-          conda install -n milo -y \
-            -c pytorch -c nvidia -c conda-forge \
-            pytorch=2.3.1 torchvision=0.18.1 torchaudio=2.3.1 \
-            pytorch-cuda=12.1 \
-            mkl=2023.1.0 \
-            cmake gmp cgal ninja pkg-config \
-            gcc_linux-64=11 gxx_linux-64=11
+          # 强制严格频道优先级，避免 pytorch 被解成 cpu 版
+          conda config --set channel_priority strict
 
+          echo "Install PyTorch CUDA stack first..."
+          conda install -n milo -y \
+            -c pytorch -c nvidia \
+            pytorch=2.3.1 \
+            torchvision=0.18.1 \
+            torchaudio=2.3.1 \
+            pytorch-cuda=12.1
+
+          echo "Install remaining conda packages..."
+          conda install -n milo -y \
+            -c conda-forge \
+            mkl=2023.1.0 \
+            cmake \
+            gmp \
+            cgal \
+            ninja \
+            pkg-config \
+            gcc_linux-64=11 \
+            gxx_linux-64=11
+
+          echo "Install pip packages..."
           conda run -n milo pip install \
             open3d==0.19.0 \
             trimesh==4.6.8 \
@@ -71,10 +87,18 @@ jobs:
           conda run -n milo python - <<'PY'
           import torch
           print("torch:", torch.__version__)
-          print("torch cuda:", torch.version.cuda)
-          print("cuda available:", torch.cuda.is_available())
-          assert torch.version.cuda is not None, "Not a CUDA build!"
+          print("torch.version.cuda:", torch.version.cuda)
+          print("torch.cuda.is_available():", torch.cuda.is_available())
+
+          # 注意：GitHub Actions 的 runner 通常没有 GPU，
+          # 所以 torch.cuda.is_available() 很可能是 False，
+          # 不能用它来判断是不是 CUDA build。
+          assert torch.version.cuda == "12.1", f"Expected CUDA 12.1 build, got {torch.version.cuda}"
+          print("PyTorch CUDA build check passed")
           PY
+
+          echo "Check torch package builds from conda:"
+          conda run -n milo conda list | grep -E 'pytorch|torchvision|torchaudio|pytorch-cuda'
 
           echo "Check pip packages:"
           conda run -n milo python - <<'PY'
@@ -115,7 +139,8 @@ jobs:
         run: |
           set -exo pipefail
 
-          rm -rf release_parts && mkdir -p release_parts
+          rm -rf release_parts
+          mkdir -p release_parts
           rm -f milo.tar.gz
 
           "$CONDA/bin/conda-pack" \
@@ -136,7 +161,6 @@ jobs:
           sha256sum milo.tar.gz.part-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
           cat milo.tar.gz.sha256
-
           df -h
 
       - name: Create GitHub Release and upload parts
@@ -155,6 +179,52 @@ jobs:
             Python version:
             ```
             3.9
+            ```
+
+            PyTorch:
+            ```
+            2.3.1
+            ```
+
+            TorchVision:
+            ```
+            0.18.1
+            ```
+
+            TorchAudio:
+            ```
+            2.3.1
+            ```
+
+            PyTorch CUDA runtime:
+            ```
+            12.1
+            ```
+
+            Installed conda packages:
+            ```
+            pytorch=2.3.1
+            torchvision=0.18.1
+            torchaudio=2.3.1
+            pytorch-cuda=12.1
+            mkl=2023.1.0
+            cmake
+            gmp
+            cgal
+            ninja
+            pkg-config
+            gcc_linux-64=11
+            gxx_linux-64=11
+            ```
+
+            Installed pip packages:
+            ```
+            open3d==0.19.0
+            trimesh==4.6.8
+            scikit-image==0.24.0
+            opencv-python==4.11.0.86
+            plyfile==1.1
+            tqdm==4.67.1
             ```
           files: |
             release_parts/milo.tar.gz.part-*
