@@ -24,31 +24,49 @@ jobs:
           use-mamba: true
           channels: conda-forge,defaults
 
-      - name: Show environment info
+      - name: Show conda info
         shell: bash -l {0}
         run: |
           conda info
           conda env list
+          echo "CONDA=$CONDA"
           python --version
           which python
 
-      - name: Install basic conda dependencies
+      - name: Install conda-pack in base
+        shell: bash -l {0}
+        run: |
+          conda activate base
+
+          mamba install -y -c conda-forge conda-pack
+
+          which conda-pack
+          conda-pack --version
+
+      - name: Install basic conda runtime dependencies
         shell: bash -l {0}
         run: |
           conda activate $ENV_NAME
 
-          mamba install -y \
-            -c conda-forge \
+          mamba install -y -c conda-forge \
             pip \
             setuptools \
             wheel \
-            conda-pack \
             ffmpeg \
             libstdcxx-ng \
             libgcc-ng \
             libgomp
 
           conda clean -afy
+
+      - name: Install JAX CUDA 12
+        shell: bash -l {0}
+        run: |
+          conda activate $ENV_NAME
+
+          python -m pip install --no-cache-dir \
+            "jax[cuda12_pip]==0.4.34" \
+            -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
       - name: Create pip requirements
         shell: bash -l {0}
@@ -62,15 +80,19 @@ jobs:
           optax==0.2.2
           rich==13.7.1
           ruamel.yaml==0.18.6
-          tensorflow[and-cuda]==2.13.0
+
+          # DreamerV3 Docker 原版用的是 tensorflow-cpu。
+          # 这里用 CPU 版 TensorFlow，避免和 JAX CUDA12 混装 CUDA 11.8 库。
+          tensorflow-cpu==2.13.0
           tensorflow_probability==0.21.0
+
           scikit-image==0.23.2
           ffmpeg==1.4
           moviepy==1.0.3
           imageio==2.34.1
           wandb==0.16.6
 
-          # 服务器部署更推荐 headless 版本，避免依赖系统 libGL / GUI。
+          # 服务器部署推荐 headless 版本，避免依赖系统 GUI / libGL。
           opencv-python-headless>=4.9,<5.0
 
           shapely==1.8.4
@@ -80,34 +102,25 @@ jobs:
           pyzmq
           einops
 
-          # TensorFlow 2.13 要求 typing_extensions < 4.6.0
+          # TensorFlow 2.13 需要 typing_extensions < 4.6.0
           typing_extensions==4.5.0
           EOF
 
-      - name: Install pip dependencies
+          cat > /tmp/cardreamer_constraints.txt <<'EOF'
+          jax==0.4.34
+          jaxlib==0.4.34
+          numpy==1.24.3
+          typing_extensions==4.5.0
+          EOF
+
+      - name: Install pip runtime dependencies
         shell: bash -l {0}
         run: |
           conda activate $ENV_NAME
 
-          python -m pip install --upgrade pip setuptools wheel
-
-          python -m pip install -r /tmp/cardreamer_requirements.txt
-
-      - name: Install JAX CUDA 12 package
-        shell: bash -l {0}
-        run: |
-          conda activate $ENV_NAME
-
-          python -m pip install \
-            "jax[cuda12_pip]==0.4.34" \
-            -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-
-      - name: Re-pin TensorFlow compatible typing_extensions
-        shell: bash -l {0}
-        run: |
-          conda activate $ENV_NAME
-
-          python -m pip install typing_extensions==4.5.0
+          python -m pip install --no-cache-dir \
+            -r /tmp/cardreamer_requirements.txt \
+            -c /tmp/cardreamer_constraints.txt
 
       - name: Add activation scripts
         shell: bash -l {0}
@@ -126,7 +139,7 @@ jobs:
           export NUMBA_CACHE_DIR=/tmp
           export XLA_PYTHON_CLIENT_MEM_FRACTION=0.8
 
-          # 自动收集 pip 安装的 nvidia CUDA runtime 库路径。
+          # 收集 pip 安装的 NVIDIA CUDA runtime 库路径。
           _CARDR_NVIDIA_LIB_PATHS=""
 
           for _pkg in \
@@ -180,7 +193,7 @@ jobs:
           chmod +x "$CONDA_PREFIX/etc/conda/activate.d/cardreamer_env.sh"
           chmod +x "$CONDA_PREFIX/etc/conda/deactivate.d/cardreamer_env.sh"
 
-      - name: Test basic imports
+      - name: Test imports
         shell: bash -l {0}
         run: |
           conda activate $ENV_NAME
@@ -197,9 +210,14 @@ jobs:
 
           import jax
           print("jax:", jax.__version__)
+          print("jax devices:", jax.devices())
 
           import tensorflow as tf
           print("tensorflow:", tf.__version__)
+          print("tf gpu devices:", tf.config.list_physical_devices("GPU"))
+
+          import tensorflow_probability as tfp
+          print("tensorflow_probability:", tfp.__version__)
 
           import optax
           print("optax:", optax.__version__)
@@ -227,16 +245,16 @@ jobs:
           import zmq
           import einops
 
-          print("All basic imports passed.")
+          print("All import tests passed.")
           PY
 
       - name: Pip check
         shell: bash -l {0}
         run: |
           conda activate $ENV_NAME
-          python -m pip check || true
+          python -m pip check
 
-      - name: Clean environment
+      - name: Clean package caches
         shell: bash -l {0}
         run: |
           conda activate $ENV_NAME
@@ -244,9 +262,9 @@ jobs:
           python -m pip cache purge || true
           conda clean -afy
 
-          find "$CONDA_PREFIX" -type d -name "__pycache__" -exec rm -rf {} + || true
-          find "$CONDA_PREFIX" -type f -name "*.pyc" -delete || true
-          find "$CONDA_PREFIX" -type f -name "*.pyo" -delete || true
+          # 注意：
+          # 不要删除 __pycache__ / *.pyc。
+          # conda-pack 会检查 conda 管理的文件，删除 pyc 会导致 CondaPackError。
 
       - name: Pack conda environment
         shell: bash -l {0}
@@ -255,10 +273,7 @@ jobs:
 
           mkdir -p dist
 
-          which conda-pack
-          conda-pack --version
-
-          conda-pack \
+          "$CONDA/bin/conda-pack" \
             -n "$ENV_NAME" \
             -o "dist/$PACK_NAME" \
             --compress-level 6
