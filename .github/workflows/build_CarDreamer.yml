@@ -1,244 +1,131 @@
-name: Build CarDreamer Offline Conda Pack
+name: Build CarDreamer Offline Conda Env
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
 
 jobs:
-  build-offline-env:
+  build-offline-conda-env:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
-
-    env:
-      ENV_NAME: cardreamer
-      PYTHON_VERSION: "3.10"
-      PACK_NAME: cardreamer_env_ubuntu2204_py310_cuda121
-      CONDA_ENV_DIR: /usr/share/miniconda/envs/cardreamer
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Miniconda
+      - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
-          python-version: ${{ env.PYTHON_VERSION }}
-          activate-environment: ${{ env.ENV_NAME }}
+          python-version: "3.10"
+          miniconda-version: "latest"
+          activate-environment: cardreamer
           environment-file: ""
           auto-activate-base: false
 
       - name: Create conda environment
         shell: bash -l {0}
         run: |
-          conda create -y -n "${ENV_NAME}" python="${PYTHON_VERSION}"
-          conda activate "${ENV_NAME}"
+          conda create -y -n cardreamer python=3.10 pip
+          conda activate cardreamer
           python --version
           pip --version
 
-      - name: Install basic build tools
+      - name: Upgrade pip/setuptools/wheel
         shell: bash -l {0}
         run: |
-          conda activate "${ENV_NAME}"
+          conda activate cardreamer
           python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install basic tools
+        shell: bash -l {0}
+        run: |
+          conda activate cardreamer
           pip install flit conda-pack
 
-      - name: Install CarDreamer package
+      - name: Install Python dependencies for CarDreamer + DreamerV3
         shell: bash -l {0}
         run: |
-          conda activate "${ENV_NAME}"
-          if [ ! -f "pyproject.toml" ]; then
-            echo "pyproject.toml not found in repository root."
-            echo "Please make sure this workflow is placed in the CarDreamer repository root."
-            exit 1
-          fi
+          conda activate cardreamer
 
-          # 安装 CarDreamer 本体
-          flit install --symlink
+          pip install \
+            cloudpickle==3.0.0 \
+            crafter==1.8.3 \
+            gym==0.12.5 \
+            dm_control==1.0.18 \
+            numpy==1.24.3 \
+            optax==0.2.2 \
+            rich==13.7.1 \
+            ruamel.yaml==0.18.6 \
+            "tensorflow[and-cuda]==2.13.0" \
+            tensorflow_probability==0.21.0 \
+            scikit-image==0.23.2 \
+            ffmpeg==1.4 \
+            moviepy==1.0.3 \
+            imageio==2.34.1 \
+            wandb==0.16.6 \
+            "opencv-python>=4.9,<5.0" \
+            shapely==1.8.4 \
+            carla==0.9.15 \
+            matplotlib==3.8.4 \
+            tabulate==0.9.0 \
+            msgpack \
+            pyzmq \
+            einops
 
-      - name: Install DreamerV3 dependencies
+      - name: Install JAX CUDA12 wheels
         shell: bash -l {0}
         run: |
-          conda activate "${ENV_NAME}"
-
-          if [ ! -f "dreamerv3/requirements.txt" ]; then
-            echo "dreamerv3/requirements.txt not found."
-            exit 1
-          fi
-
-          pip install -r dreamerv3/requirements.txt
-
-      - name: Reinstall JAX with CUDA 12 support
-        shell: bash -l {0}
-        run: |
-          conda activate "${ENV_NAME}"
-
-          # 先卸载 requirements.txt 里可能已经装入的 jax/jaxlib
-          pip uninstall -y jax jaxlib || true
-
-          # 安装 CUDA12 版本 JAX
-          pip install --upgrade "jax[cuda12]==0.4.34"
-
-      - name: Install CUDA 12.1 runtime libs from conda-forge
-        shell: bash -l {0}
-        run: |
-          conda activate "${ENV_NAME}"
-
-          # 尽量补齐常见运行时库，便于离线迁移
-          conda install -y -c conda-forge \
-            cuda-version=12.1 \
-            cudatoolkit || true
+          conda activate cardreamer
+          pip install \
+            jax==0.4.34 \
+            jaxlib==0.4.34 \
+            -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
       - name: Validate imports
         shell: bash -l {0}
         run: |
-          conda activate "${ENV_NAME}"
-
-          python - <<'PY'
+          conda activate cardreamer
+          python - << 'PY'
           import sys
           print("Python:", sys.version)
 
-          mods = [
-              "carla",
-              "jax",
-              "tensorflow",
-              "numpy",
-              "cv2",
-              "matplotlib",
-              "optax",
-              "ruamel.yaml",
-              "einops",
-          ]
+          import numpy
+          import gym
+          import jax
+          import tensorflow as tf
+          import cv2
+          import shapely
+          import matplotlib
+          import moviepy
+          import imageio
+          import zmq
+          import einops
+          import msgpack
 
-          for m in mods:
-              try:
-                  __import__(m)
-                  print(f"[OK] import {m}")
-              except Exception as e:
-                  print(f"[FAIL] import {m}: {e}")
-                  raise
+          print("numpy:", numpy.__version__)
+          print("jax:", jax.__version__)
+          print("tf:", tf.__version__)
+          print("cv2:", cv2.__version__)
+          print("Import validation passed.")
           PY
 
-      - name: Export environment info
+      - name: Clean pip cache
         shell: bash -l {0}
         run: |
-          conda activate "${ENV_NAME}"
-
-          mkdir -p output
-
-          {
-            echo "===== conda info ====="
-            conda info
-            echo
-            echo "===== conda list ====="
-            conda list
-          } > output/env_info.txt
-
-          pip freeze > output/pip_freeze.txt
-
-          python - <<'PY' > output/python_check.txt
-          import sys
-          print("Python executable:", sys.executable)
-          print("Python version:", sys.version)
-
-          try:
-              import jax
-              print("JAX version:", jax.__version__)
-          except Exception as e:
-              print("JAX import failed:", e)
-
-          try:
-              import tensorflow as tf
-              print("TensorFlow version:", tf.__version__)
-              print("TF GPUs:", tf.config.list_physical_devices('GPU'))
-          except Exception as e:
-              print("TensorFlow import failed:", e)
-
-          try:
-              import carla
-              print("CARLA module:", carla)
-          except Exception as e:
-              print("CARLA import failed:", e)
-          PY
+          conda activate cardreamer
+          pip cache purge || true
+          conda clean -a -y || true
 
       - name: Pack conda environment
         shell: bash -l {0}
         run: |
-          conda activate "${ENV_NAME}"
-
-          mkdir -p output
-          conda-pack -n "${ENV_NAME}" -o "output/${PACK_NAME}.tar.gz"
-
-      - name: Archive repository helper scripts
-        shell: bash -l {0}
-        run: |
-          mkdir -p output
-
-          cat > output/restore_env.sh <<'SH'
-          #!/usr/bin/env bash
-          set -euo pipefail
-
-          if [ $# -lt 2 ]; then
-            echo "Usage: bash restore_env.sh <packed_env.tar.gz> <target_dir>"
-            exit 1
-          fi
-
-          PACK_FILE="$1"
-          TARGET_DIR="$2"
-
-          mkdir -p "${TARGET_DIR}"
-          tar -xzf "${PACK_FILE}" -C "${TARGET_DIR}"
-
-          source "${TARGET_DIR}/bin/activate"
-          "${TARGET_DIR}/bin/conda-unpack"
-
-          echo "Environment restored to: ${TARGET_DIR}"
-          echo "Activate with: source ${TARGET_DIR}/bin/activate"
-          SH
-
-          chmod +x output/restore_env.sh
-
-          cat > output/run_env_check.sh <<'SH'
-          #!/usr/bin/env bash
-          set -euo pipefail
-
-          python - <<'PY'
-          import sys
-          print("Python:", sys.version)
-
-          try:
-              import jax
-              print("JAX:", jax.__version__)
-              try:
-                  print("JAX devices:", jax.devices())
-              except Exception as e:
-                  print("JAX devices failed:", e)
-          except Exception as e:
-              print("JAX import failed:", e)
-
-          try:
-              import tensorflow as tf
-              print("TensorFlow:", tf.__version__)
-              print("TF GPUs:", tf.config.list_physical_devices('GPU'))
-          except Exception as e:
-              print("TensorFlow import failed:", e)
-
-          try:
-              import carla
-              print("CARLA import OK")
-          except Exception as e:
-              print("CARLA import failed:", e)
-          PY
-          SH
-
-          chmod +x output/run_env_check.sh
+          conda activate cardreamer
+          mkdir -p dist
+          conda-pack -n cardreamer -o dist/cardreamer-ubuntu2204-py310-cuda121.tar.gz
 
       - name: Upload packed environment
         uses: actions/upload-artifact@v4
         with:
-          name: cardreamer-offline-conda-pack
-          path: output/
+          name: cardreamer-ubuntu2204-py310-cuda121
+          path: dist/cardreamer-ubuntu2204-py310-cuda121.tar.gz
           if-no-files-found: error
