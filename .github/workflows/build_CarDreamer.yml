@@ -255,7 +255,10 @@ jobs:
 
           mkdir -p dist
 
-          conda pack \
+          which conda-pack
+          conda-pack --version
+
+          conda-pack \
             -n "$ENV_NAME" \
             -o "dist/$PACK_NAME" \
             --compress-level 6
