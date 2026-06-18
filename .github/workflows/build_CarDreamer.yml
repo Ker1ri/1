@@ -1,4 +1,4 @@
-name: Pack CarDreamer DreamerV3 Conda Env
+name: Pack CarDreamer DreamerV3 Runtime Env
 
 on:
   workflow_dispatch:
@@ -11,12 +11,9 @@ jobs:
     env:
       ENV_NAME: cardreamer
       PYTHON_VERSION: "3.10"
-      PACK_NAME: cardreamer-dreamerv3-py310-ubuntu2204.tar.gz
+      PACK_NAME: cardreamer-dreamerv3-runtime-py310-ubuntu2204.tar.gz
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Setup Miniforge
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -25,9 +22,9 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           auto-activate-base: false
           use-mamba: true
-          channels: conda-forge,nvidia/label/cuda-12.1.0,defaults
+          channels: conda-forge,defaults
 
-      - name: Show conda info
+      - name: Show environment info
         shell: bash -l {0}
         run: |
           conda info
@@ -35,14 +32,13 @@ jobs:
           python --version
           which python
 
-      - name: Install conda dependencies
+      - name: Install basic conda dependencies
         shell: bash -l {0}
         run: |
           conda activate $ENV_NAME
 
           mamba install -y \
             -c conda-forge \
-            -c nvidia/label/cuda-12.1.0 \
             pip \
             setuptools \
             wheel \
@@ -50,7 +46,7 @@ jobs:
             ffmpeg \
             libstdcxx-ng \
             libgcc-ng \
-            cuda-toolkit=12.1
+            libgomp
 
           conda clean -afy
 
@@ -73,17 +69,19 @@ jobs:
           moviepy==1.0.3
           imageio==2.34.1
           wandb==0.16.6
-          opencv-python>=4.9,<5.0
+
+          # 服务器部署更推荐 headless 版本，避免依赖系统 libGL / GUI。
+          opencv-python-headless>=4.9,<5.0
+
           shapely==1.8.4
           matplotlib==3.8.4
           tabulate==0.9.0
           msgpack
           pyzmq
           einops
-          ipykernel
-          jupyterlab
-          notebook
-          ipywidgets
+
+          # TensorFlow 2.13 要求 typing_extensions < 4.6.0
+          typing_extensions==4.5.0
           EOF
 
       - name: Install pip dependencies
@@ -95,16 +93,21 @@ jobs:
 
           python -m pip install -r /tmp/cardreamer_requirements.txt
 
-      - name: Install JAX CUDA dependencies
+      - name: Install JAX CUDA 12 package
         shell: bash -l {0}
         run: |
           conda activate $ENV_NAME
 
-          # 对应 CarDreamer README：
-          # pip install "jax[cuda12_pip]==0.4.34" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
           python -m pip install \
             "jax[cuda12_pip]==0.4.34" \
             -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+      - name: Re-pin TensorFlow compatible typing_extensions
+        shell: bash -l {0}
+        run: |
+          conda activate $ENV_NAME
+
+          python -m pip install typing_extensions==4.5.0
 
       - name: Add activation scripts
         shell: bash -l {0}
@@ -123,18 +126,42 @@ jobs:
           export NUMBA_CACHE_DIR=/tmp
           export XLA_PYTHON_CLIENT_MEM_FRACTION=0.8
 
-          # TensorFlow / JAX pip CUDA packages may provide nvidia.cudnn and nvidia.cusolver.
-          if python -c "import nvidia.cudnn, nvidia.cusolver" >/dev/null 2>&1; then
-            export CUDNN_PATH=$(dirname $(python -c "import nvidia.cudnn; print(nvidia.cudnn.__file__)"))
-            export CUSOLVER_PATH=$(dirname $(python -c "import nvidia.cusolver; print(nvidia.cusolver.__file__)"))
-            export LD_LIBRARY_PATH="$CUDNN_PATH/lib:$CUSOLVER_PATH/lib:$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-          else
-            export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
-          fi
+          # 自动收集 pip 安装的 nvidia CUDA runtime 库路径。
+          _CARDR_NVIDIA_LIB_PATHS=""
 
-          # 如果你在 notebook 中放置了 CARLA，可以手动设置：
-          # export CARLA_ROOT=/path/to/CARLA_0.9.15
-          # export PYTHONPATH=$CARLA_ROOT/PythonAPI/carla:$CARLA_ROOT/PythonAPI/carla/agents:$PYTHONPATH
+          for _pkg in \
+            cuda_runtime \
+            cublas \
+            cufft \
+            curand \
+            cusolver \
+            cusparse \
+            cudnn \
+            nccl \
+            nvjitlink
+          do
+            _path=$(python - <<PY 2>/dev/null || true
+          import os
+          try:
+              import nvidia.${_pkg}
+              p = os.path.dirname(nvidia.${_pkg}.__file__)
+              lib = os.path.join(p, "lib")
+              if os.path.isdir(lib):
+                  print(lib)
+          except Exception:
+              pass
+          PY
+          )
+            if [ -n "$_path" ]; then
+              _CARDR_NVIDIA_LIB_PATHS="${_path}:${_CARDR_NVIDIA_LIB_PATHS}"
+            fi
+          done
+
+          export LD_LIBRARY_PATH="${_CARDR_NVIDIA_LIB_PATHS}${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
+
+          unset _pkg
+          unset _path
+          unset _CARDR_NVIDIA_LIB_PATHS
           EOF
 
           cat > "$CONDA_PREFIX/etc/conda/deactivate.d/cardreamer_env.sh" <<'EOF'
@@ -145,8 +172,6 @@ jobs:
             unset _CARDR_OLD_LD_LIBRARY_PATH
           fi
 
-          unset CUDNN_PATH
-          unset CUSOLVER_PATH
           unset MUJOCO_GL
           unset NUMBA_CACHE_DIR
           unset XLA_PYTHON_CLIENT_MEM_FRACTION
@@ -155,17 +180,7 @@ jobs:
           chmod +x "$CONDA_PREFIX/etc/conda/activate.d/cardreamer_env.sh"
           chmod +x "$CONDA_PREFIX/etc/conda/deactivate.d/cardreamer_env.sh"
 
-      - name: Register Jupyter kernel
-        shell: bash -l {0}
-        run: |
-          conda activate $ENV_NAME
-
-          python -m ipykernel install \
-            --prefix "$CONDA_PREFIX" \
-            --name cardreamer \
-            --display-name "Python 3.10 CarDreamer DreamerV3"
-
-      - name: Test imports
+      - name: Test basic imports
         shell: bash -l {0}
         run: |
           conda activate $ENV_NAME
@@ -176,6 +191,9 @@ jobs:
 
           import numpy
           print("numpy:", numpy.__version__)
+
+          import typing_extensions
+          print("typing_extensions imported")
 
           import jax
           print("jax:", jax.__version__)
@@ -195,8 +213,28 @@ jobs:
           import dm_control
           print("dm_control imported")
 
-          print("Import test finished.")
+          import cloudpickle
+          import rich
+          import ruamel.yaml
+          import skimage
+          import moviepy
+          import imageio
+          import wandb
+          import shapely
+          import matplotlib
+          import tabulate
+          import msgpack
+          import zmq
+          import einops
+
+          print("All basic imports passed.")
           PY
+
+      - name: Pip check
+        shell: bash -l {0}
+        run: |
+          conda activate $ENV_NAME
+          python -m pip check || true
 
       - name: Clean environment
         shell: bash -l {0}
@@ -229,7 +267,7 @@ jobs:
       - name: Upload packed environment
         uses: actions/upload-artifact@v4
         with:
-          name: cardreamer-dreamerv3-conda-env
+          name: cardreamer-dreamerv3-runtime-conda-env
           path: |
             dist/${{ env.PACK_NAME }}
             dist/${{ env.PACK_NAME }}.sha256
